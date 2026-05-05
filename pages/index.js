@@ -1,150 +1,156 @@
-
 import { useState } from 'react'
 import styles from '../styles/Home.module.css'
 
+const METHODS = [
+  { value: 'flood', label: 'Standard HTTP Flood' },
+  { value: 'hashdos', label: 'Hash Collision DoS' },
+  { value: 'slowread', label: 'Slow Read Attack' },
+  { value: 'smuggle', label: 'HTTP Request Smuggling' },
+  { value: 'paretoflood', label: 'Pareto Flood (bypass rate limit)' },
+  { value: 'zipbomb', label: 'Decompression Bomb' },
+  { value: 'rapidreset', label: 'Rapid Reset (HTTP/2)' },
+  { value: 'pipeline', label: 'HTTP Pipelining' },
+  { value: 'originbypass', label: 'Bypass CDN (origin IP)' },
+  { value: 'tlsflood', label: 'TLS Handshake Flood' },
+  { value: 'cachepoison', label: 'Cache Poison' },
+  { value: 'apachekiller', label: 'Apache Killer' },
+  { value: 'nginxkiller', label: 'NGINX Killer (Range overlapping)' },
+  { value: 'randombrowser', label: 'Random Fingerprint' },
+  { value: 'multivector', label: 'Multi-Vector (HTTP mix)' },
+]
+
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH']
+
 export default function Home() {
-  const [url, setUrl] = useState('https://jsonplaceholder.typicode.com/posts/1')
-  const [method, setMethod] = useState('GET')
-  const [total, setTotal] = useState(50)
-  const [concurrency, setConcurrency] = useState(10)
-  const [timeout, setTimeout] = useState(10000) // ms
-  const [headers, setHeaders] = useState([{ key: '', value: '' }])
-  const [body, setBody] = useState('')
-  const [contentType, setContentType] = useState('application/json')
+  const [target, setTarget] = useState('')
+  const [attackMethod, setAttackMethod] = useState('flood')
+  const [httpMethod, setHttpMethod] = useState('GET')
+  const [threads, setThreads] = useState(5)
+  const [duration, setDuration] = useState(30)
+  const [useProxy, setUseProxy] = useState(false)
+  const [proxies, setProxies] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
-  const [showRaw, setShowRaw] = useState(false)
-
-  const methodsWithBody = ['POST', 'PUT', 'PATCH']
-
-  const addHeader = () => setHeaders([...headers, { key: '', value: '' }])
-  const removeHeader = (index) => setHeaders(headers.filter((_, i) => i !== index))
-  const updateHeader = (index, field, value) => {
-    const newHeaders = [...headers]
-    newHeaders[index][field] = value
-    setHeaders(newHeaders)
-  }
+  const [liveStats, setLiveStats] = useState(null)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
     setResult(null)
+    setLiveStats(null)
 
-    // Filter empty headers
-    const sanitizedHeaders = {}
-    headers.forEach(({ key, value }) => {
-      if (key.trim()) sanitizedHeaders[key.trim()] = value.trim()
-    })
+    // Parse proxies
+    const proxyList = useProxy ? proxies.split('\n').map(p=>p.trim()).filter(Boolean) : []
 
-    // Auto-set Content-Type if user didn't
-    if (methodsWithBody.includes(method) && body && !sanitizedHeaders['Content-Type']) {
-      sanitizedHeaders['Content-Type'] = contentType
+    const body = {
+      target,
+      method: attackMethod,
+      httpMethod,
+      threads: Number(threads),
+      duration: Number(duration),
+      proxies: proxyList
     }
 
     try {
-      const res = await fetch('/api/stress', {
+      const res = await fetch('/api/attack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url,
-          method,
-          total,
-          concurrency,
-          timeout,
-          headers: sanitizedHeaders,
-          body: methodsWithBody.includes(method) ? body : undefined
-        })
+        body: JSON.stringify(body)
       })
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.message || 'Request failed')
+      // Read stream for live stats
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        
+        // Process SSE-like lines
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.trim().startsWith('data:')) {
+            try {
+              const data = JSON.parse(line.trim().slice(5))
+              setLiveStats(data)
+            } catch {}
+          }
+        }
       }
-
-      const data = await res.json()
-      setResult(data)
+      // Final data
+      if (buffer.trim().startsWith('data:')) {
+        try {
+          const finalData = JSON.parse(buffer.trim().slice(5))
+          setResult(finalData)
+        } catch {}
+      }
+      setLoading(false)
     } catch (err) {
       setError(err.message)
-    } finally {
       setLoading(false)
     }
   }
 
-  const stats = result ? computeStats(result.results, result.totalTime) : null
-
   return (
     <div className={styles.container}>
       <main className={styles.main}>
-        <h1 className={styles.title}>⚡ Advanced Stress Tester</h1>
+        <h1 className={styles.title}>⚡ Layer 7 Stress Tester</h1>
         <p className={styles.description}>
-          Uji ketahanan server dengan berbagai method dan header kustom.
+          Uji ketahanan server web dengan berbagai metode HTTP attack. <strong>Hanya untuk server yang Anda miliki izin.</strong>
+        </p>
+        <p className={styles.warning}>
+          ⚠️ Layer 3/4 (SYN flood, UDP, ICMP, amplifikasi) tidak tersedia di Vercel karena keterbatasan serverless.
         </p>
 
         <form onSubmit={handleSubmit} className={styles.form}>
           <div className={styles.inputGroup}>
             <label>Target URL</label>
-            <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} required />
+            <input type="url" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="https://example.com" required />
           </div>
 
           <div className={styles.row}>
             <div className={styles.inputGroup}>
-              <label>HTTP Method</label>
-              <select value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option>GET</option>
-                <option>POST</option>
-                <option>PUT</option>
-                <option>PATCH</option>
-                <option>DELETE</option>
-                <option>HEAD</option>
-                <option>OPTIONS</option>
+              <label>Attack Method</label>
+              <select value={attackMethod} onChange={(e) => setAttackMethod(e.target.value)}>
+                {METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
             <div className={styles.inputGroup}>
-              <label>Total Request</label>
-              <input type="number" min="1" max="500" value={total} onChange={(e) => setTotal(Number(e.target.value))} required />
+              <label>HTTP Method</label>
+              <select value={httpMethod} onChange={(e) => setHttpMethod(e.target.value)}>
+                {HTTP_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
             </div>
           </div>
 
           <div className={styles.row}>
             <div className={styles.inputGroup}>
-              <label>Concurrency</label>
-              <input type="number" min="1" max="100" value={concurrency} onChange={(e) => setConcurrency(Number(e.target.value))} required />
+              <label>Concurrency (threads)</label>
+              <input type="number" min="1" max="100" value={threads} onChange={(e) => setThreads(Number(e.target.value))} required />
             </div>
             <div className={styles.inputGroup}>
-              <label>Timeout (ms)</label>
-              <input type="number" min="500" max="30000" value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} required />
+              <label>Duration (detik)</label>
+              <input type="number" min="5" max="120" value={duration} onChange={(e) => setDuration(Number(e.target.value))} required />
             </div>
           </div>
 
-          <div className={styles.section}>
-            <h3>Custom Headers</h3>
-            {headers.map((h, i) => (
-              <div key={i} className={styles.headerRow}>
-                <input placeholder="Key" value={h.key} onChange={(e) => updateHeader(i, 'key', e.target.value)} />
-                <input placeholder="Value" value={h.value} onChange={(e) => updateHeader(i, 'value', e.target.value)} />
-                {headers.length > 1 && <button type="button" onClick={() => removeHeader(i)} className={styles.btnSmall}>✕</button>}
-              </div>
-            ))}
-            <button type="button" onClick={addHeader} className={styles.btnSmall}>+ Tambah Header</button>
+          <div className={styles.checkboxGroup}>
+            <label>
+              <input type="checkbox" checked={useProxy} onChange={(e) => setUseProxy(e.target.checked)} />
+              Gunakan HTTP Proxy (rotasi)
+            </label>
           </div>
 
-          {methodsWithBody.includes(method) && (
-            <div className={styles.section}>
-              <div className={styles.inputGroup}>
-                <label>Request Body (opsional)</label>
-                <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder='{"key":"value"}' />
-              </div>
-              <div className={styles.inputGroup}>
-                <label>Content-Type</label>
-                <select value={contentType} onChange={(e) => setContentType(e.target.value)}>
-                  <option value="application/json">application/json</option>
-                  <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
-                  <option value="text/plain">text/plain</option>
-                  <option value="application/xml">application/xml</option>
-                </select>
-              </div>
+          {useProxy && (
+            <div className={styles.inputGroup}>
+              <label>Daftar Proxy (satu per baris, format http://user:pass@host:port)</label>
+              <textarea value={proxies} onChange={(e) => setProxies(e.target.value)} rows={4} 
+                placeholder="http://proxy1.com:8080&#10;http://proxy2.net:3128" />
             </div>
           )}
 
@@ -155,84 +161,42 @@ export default function Home() {
 
         {error && <div className={styles.error}>{error}</div>}
 
-        {stats && (
+        {liveStats && (
           <div className={styles.results}>
-            <h2>Hasil Stress Test</h2>
+            <h2>Statistik Real-Time</h2>
             <div className={styles.statsGrid}>
               <div className={styles.statCard}>
-                <span>Total Waktu</span>
-                <strong>{stats.totalTime} ms</strong>
+                <span>Total Request</span>
+                <strong>{liveStats.total}</strong>
               </div>
               <div className={styles.statCard}>
                 <span>Sukses</span>
-                <strong>{stats.successCount} / {stats.total}</strong>
+                <strong>{liveStats.success}</strong>
               </div>
               <div className={styles.statCard}>
                 <span>Gagal</span>
-                <strong>{stats.failCount}</strong>
+                <strong>{liveStats.failed}</strong>
               </div>
               <div className={styles.statCard}>
-                <span>Avg. Response</span>
-                <strong>{stats.avgTime} ms</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span>Min</span>
-                <strong>{stats.minTime} ms</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span>Max</span>
-                <strong>{stats.maxTime} ms</strong>
+                <span>RPS</span>
+                <strong>{liveStats.rps}</strong>
               </div>
             </div>
+          </div>
+        )}
 
-            <h3 style={{ marginTop: '1.5rem' }}>Distribusi Status Code</h3>
-            <table className={styles.statusTable}>
-              <thead>
-                <tr><th>Status</th><th>Jumlah</th></tr>
-              </thead>
-              <tbody>
-                {Object.entries(stats.statusCounts).map(([code, count]) => (
-                  <tr key={code}><td>{code}</td><td>{count}</td></tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div style={{ marginTop: '1rem' }}>
-              <button onClick={() => setShowRaw(!showRaw)} className={styles.btnSmall}>
-                {showRaw ? 'Sembunyikan Detail' : 'Lihat Detail Tiap Request'}
-              </button>
-              {showRaw && (
-                <div className={styles.rawLog}>
-                  {result.results.map((r, i) => (
-                    <div key={i} className={styles.logItem}>
-                      [<span className={r.success ? styles.success : styles.fail}>{r.status}</span>] {r.time}ms {r.error ? ` – ${r.error}` : ''}
-                    </div>
-                  ))}
-                </div>
-              )}
+        {result && !liveStats && (
+          <div className={styles.results}>
+            <h2>Hasil Akhir</h2>
+            <div className={styles.statsGrid}>
+              <div className={styles.statCard}><span>Total</span><strong>{result.total}</strong></div>
+              <div className={styles.statCard}><span>Sukses</span><strong>{result.success}</strong></div>
+              <div className={styles.statCard}><span>Gagal</span><strong>{result.failed}</strong></div>
+              <div className={styles.statCard}><span>Durasi</span><strong>{result.duration}s</strong></div>
             </div>
           </div>
         )}
       </main>
     </div>
   )
-}
-
-function computeStats(results, totalTime) {
-  const total = results.length
-  const success = results.filter(r => r.success).length
-  const fail = total - success
-  const times = results.map(r => r.time).filter(t => t > 0)
-  const avg = times.length ? Math.round(times.reduce((a,b)=>a+b,0) / times.length) : 0
-  const min = times.length ? Math.min(...times) : 0
-  const max = times.length ? Math.max(...times) : 0
-
-  // Status code distribution
-  const statusCounts = {}
-  results.forEach(r => {
-    const code = r.status || 'Error'
-    statusCounts[code] = (statusCounts[code] || 0) + 1
-  })
-
-  return { total, successCount: success, failCount: fail, totalTime, avgTime: avg, minTime: min, maxTime: max, statusCounts }
 }
