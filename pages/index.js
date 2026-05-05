@@ -131,11 +131,11 @@ export default function Home() {
           <div className={styles.row}>
             <div className={styles.inputGroup}>
               <label>Concurrency (threads)</label>
-              <input type="number" min="1" max="100" value={threads} onChange={(e) => setThreads(Number(e.target.value))} required />
+              <input type="number" min="1" max="100000" value={threads} onChange={(e) => setThreads(Number(e.target.value))} required />
             </div>
             <div className={styles.inputGroup}>
               <label>Duration (detik)</label>
-              <input type="number" min="5" max="120" value={duration} onChange={(e) => setDuration(Number(e.target.value))} required />
+              <input type="number" min="5" max="1200000" value={duration} onChange={(e) => setDuration(Number(e.target.value))} required />
             </div>
           </div>
 
