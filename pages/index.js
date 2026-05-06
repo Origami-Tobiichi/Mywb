@@ -1,201 +1,127 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import Head from 'next/head'
 import styles from '../styles/Home.module.css'
 
-const METHODS = [
-  { value: 'flood', label: 'Standard HTTP Flood' },
-  { value: 'hashdos', label: 'Hash Collision DoS' },
-  { value: 'slowread', label: 'Slow Read Attack' },
-  { value: 'smuggle', label: 'HTTP Request Smuggling' },
-  { value: 'paretoflood', label: 'Pareto Flood (bypass rate limit)' },
-  { value: 'zipbomb', label: 'Decompression Bomb' },
-  { value: 'rapidreset', label: 'Rapid Reset (HTTP/2)' },
-  { value: 'pipeline', label: 'HTTP Pipelining' },
-  { value: 'originbypass', label: 'Bypass CDN (origin IP)' },
-  { value: 'tlsflood', label: 'TLS Handshake Flood' },
-  { value: 'cachepoison', label: 'Cache Poison' },
-  { value: 'apachekiller', label: 'Apache Killer' },
-  { value: 'nginxkiller', label: 'NGINX Killer (Range overlapping)' },
-  { value: 'randombrowser', label: 'Random Fingerprint' },
-  { value: 'multivector', label: 'Multi-Vector (HTTP mix)' },
-]
-
-const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH']
-
 export default function Home() {
-  const [target, setTarget] = useState('')
-  const [attackMethod, setAttackMethod] = useState('flood')
-  const [httpMethod, setHttpMethod] = useState('GET')
-  const [threads, setThreads] = useState(50)        // default 50
-  const [duration, setDuration] = useState(60)       // default 60
-  const [useProxy, setUseProxy] = useState(false)
-  const [proxies, setProxies] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
-  const [liveStats, setLiveStats] = useState(null)
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false)
+  const audioRef = useRef(null)
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    setResult(null)
-    setLiveStats(null)
-
-    const proxyList = useProxy ? proxies.split('\n').map(p => p.trim()).filter(Boolean) : []
-
-    const body = {
-      target,
-      method: attackMethod,
-      httpMethod,
-      threads: Number(threads),
-      duration: Number(duration),
-      proxies: proxyList
-    }
-
-    try {
-      const res = await fetch('/api/attack', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (line.trim().startsWith('data:')) {
-            try {
-              const data = JSON.parse(line.trim().slice(5))
-              if (data.final) {
-                setResult(data)
-                setLiveStats(null)
-              } else {
-                setLiveStats(data)
-              }
-            } catch {}
-          }
-        }
+  useEffect(() => {
+    // Mencoba autoplay (diam, browser policy)
+    if (audioRef.current) {
+      audioRef.current.volume = 0.5
+      // Autoplay saat pengguna pertama kali klik di halaman
+      const playOnce = () => {
+        audioRef.current?.play().catch(() => {})
+        window.removeEventListener('click', playOnce)
       }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      window.addEventListener('click', playOnce)
+    }
+  }, [])
+
+  const toggleMusic = () => {
+    if (audioRef.current) {
+      if (isMusicPlaying) {
+        audioRef.current.pause()
+      } else {
+        audioRef.current.play()
+      }
+      setIsMusicPlaying(!isMusicPlaying)
     }
   }
 
+  const whatsappMessage = encodeURIComponent(
+    "Halo, saya akan menghadiri acara Makan Bersama. Mohon info lebih lanjut."
+  )
+  const whatsappUrl = `https://wa.me/6283853124466?text=${whatsappMessage}`
+
   return (
-    <div className={styles.container}>
-      <main className={styles.main}>
-        <h1 className={styles.title}>⚡ Layer 7 Stress Tester</h1>
-        <p className={styles.description}>
-          Uji ketahanan server web dengan berbagai metode HTTP attack. <strong>Hanya untuk server yang Anda miliki izin.</strong>
-        </p>
-        <p className={styles.warning}>
-          ⚠️ Layer 3/4 (SYN flood, UDP, ICMP, amplifikasi) tidak tersedia di Vercel karena keterbatasan serverless.
-        </p>
+    <>
+      <Head>
+        <title>Undangan Makan Bersama | Delyan & Putri</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta property="og:title" content="Undangan Makan Bersama" />
+        <meta property="og:description" content="Kami mengundang Anda untuk hadir di acara Makan Bersama dalam rangka memperingati pernikahan kami." />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💐</text></svg>" />
+      </Head>
 
-        <form onSubmit={handleSubmit} className={styles.form}>
-          <div className={styles.inputGroup}>
-            <label>Target URL</label>
-            <input type="url" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="https://example.com" required />
-          </div>
-
-          <div className={styles.row}>
-            <div className={styles.inputGroup}>
-              <label>Attack Method</label>
-              <select value={attackMethod} onChange={(e) => setAttackMethod(e.target.value)}>
-                {METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
-            </div>
-            <div className={styles.inputGroup}>
-              <label>HTTP Method</label>
-              <select value={httpMethod} onChange={(e) => setHttpMethod(e.target.value)}>
-                {HTTP_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className={styles.row}>
-            <div className={styles.inputGroup}>
-              <label>Concurrency (threads) – Maks 500</label>
-              <input type="number" min="1" max="500" value={threads} onChange={(e) => setThreads(Number(e.target.value))} required />
-            </div>
-            <div className={styles.inputGroup}>
-              <label>Duration (detik) – Maks 3600</label>
-              <input type="number" min="5" max="3600" value={duration} onChange={(e) => setDuration(Number(e.target.value))} required />
-            </div>
-          </div>
-
-          <div className={styles.checkboxGroup}>
-            <label>
-              <input type="checkbox" checked={useProxy} onChange={(e) => setUseProxy(e.target.checked)} />
-              Gunakan HTTP Proxy (rotasi)
-            </label>
-          </div>
-
-          {useProxy && (
-            <div className={styles.inputGroup}>
-              <label>Daftar Proxy (satu per baris, format http://user:pass@host:port)</label>
-              <textarea value={proxies} onChange={(e) => setProxies(e.target.value)} rows={4}
-                placeholder="http://proxy1.com:8080&#10;http://proxy2.net:3128" />
-            </div>
-          )}
-
-          <button type="submit" disabled={loading} className={styles.button}>
-            {loading ? 'Menyerang...' : 'Mulai Stress Test'}
-          </button>
-        </form>
-
-        {error && <div className={styles.error}>{error}</div>}
-
-        {liveStats && (
-          <div className={styles.results}>
-            <h2>Statistik Real-Time</h2>
-            <div className={styles.statsGrid}>
-              <div className={styles.statCard}>
-                <span>Total Request</span>
-                <strong>{liveStats.total}</strong>
+      <div className={styles.container}>
+        <div className={styles.card}>
+          <img 
+            src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 40'%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='30'%3E🌹🌸💐%3C/text%3E%3C/svg%3E"
+            alt="Ornamen"
+            className={styles.ornament}
+          />
+          
+          <div className={styles.titleSection}>Dengan Hormat</div>
+          
+          <h1 className={styles.names}>
+            Delyan <span className={styles.ampersand}>&amp;</span> Putri
+          </h1>
+          
+          <h2 className={styles.eventName}>🍽️ Makan Bersama</h2>
+          
+          <p className={styles.desc}>
+            Dalam rangka <strong>Memperingati Acara Pernikahan</strong> kami,<br />
+            kami mengundang Bapak/Ibu/Saudara/i untuk hadir.
+          </p>
+          
+          <div className={styles.details}>
+            <div className={styles.detailRow}>
+              <span className={styles.icon}>📅</span>
+              <div>
+                <span className={styles.label}>Hari & Tanggal</span>
+                <span className={styles.value}>Minggu, 20 Mei 2026</span>
               </div>
-              <div className={styles.statCard}>
-                <span>Sukses</span>
-                <strong>{liveStats.success}</strong>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.icon}>⏰</span>
+              <div>
+                <span className={styles.label}>Waktu</span>
+                <span className={styles.value}>Pukul 18:00 WIB</span>
               </div>
-              <div className={styles.statCard}>
-                <span>Gagal</span>
-                <strong>{liveStats.failed}</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span>RPS</span>
-                <strong>{liveStats.rps}</strong>
-              </div>
-              <div className={styles.statCard}>
-                <span>Elapsed</span>
-                <strong>{liveStats.elapsed}s</strong>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.icon}>📍</span>
+              <div>
+                <span className={styles.label}>Lokasi</span>
+                <span className={styles.value}>Jl. Anggrek No. 88, Jakarta Selatan</span>
               </div>
             </div>
           </div>
-        )}
-
-        {result && !liveStats && (
-          <div className={styles.results}>
-            <h2>Hasil Akhir</h2>
-            <div className={styles.statsGrid}>
-              <div className={styles.statCard}><span>Total</span><strong>{result.total}</strong></div>
-              <div className={styles.statCard}><span>Sukses</span><strong>{result.success}</strong></div>
-              <div className={styles.statCard}><span>Gagal</span><strong>{result.failed}</strong></div>
-              <div className={styles.statCard}><span>Durasi</span><strong>{result.duration}s</strong></div>
-            </div>
+          
+          <div className={styles.buttons}>
+            <a 
+              href={whatsappUrl} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className={`${styles.btn} ${styles.whatsapp}`}
+            >
+              💬 Konfirmasi via WhatsApp
+            </a>
+            <a 
+              href="mailto:delyan754@gmail.com" 
+              className={`${styles.btn} ${styles.email}`}
+            >
+              ✉️ Kirim Ucapan
+            </a>
           </div>
-        )}
-      </main>
-    </div>
+          
+          <p style={{ marginTop: '2rem', fontSize: '0.85rem', color: '#777' }}>
+            Merupakan suatu kehormatan dan kebahagiaan apabila Anda berkenan hadir.
+          </p>
+        </div>
+
+        {/* Musik latar opsional */}
+        <audio ref={audioRef} loop>
+          <source src="/music.mp3" type="audio/mpeg" />
+          {/* Jika tidak ada file music.mp3, tidak masalah */}
+        </audio>
+
+        <button className={styles.musicToggle} onClick={toggleMusic} aria-label="Toggle music">
+          {isMusicPlaying ? '🔊' : '🔇'}
+        </button>
+      </div>
+    </>
   )
 }
