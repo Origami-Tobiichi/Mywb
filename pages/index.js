@@ -33,7 +33,7 @@ export default function Home() {
   const whatsappMessage = encodeURIComponent(
     "Halo, saya akan menghadiri acara Makan Bersama. Mohon info lebih lanjut."
   )
-  const whatsappUrl = `https://wa.me/6283853124466?text=${whatsappMessage}`
+  const whatsappUrl = `https://wa.me/6283853214466?text=${whatsappMessage}`
 
   return (
     <>
