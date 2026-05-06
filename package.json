@@ -1,6 +1,6 @@
 {
-  "name": "stress-tester-vercel",
-  "version": "1.0.0",
+  "name": "stress-tester",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
