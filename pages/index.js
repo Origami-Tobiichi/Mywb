@@ -25,8 +25,8 @@ export default function Home() {
   const [target, setTarget] = useState('')
   const [attackMethod, setAttackMethod] = useState('flood')
   const [httpMethod, setHttpMethod] = useState('GET')
-  const [threads, setThreads] = useState(50000)
-  const [duration, setDuration] = useState(30000)
+  const [threads, setThreads] = useState(50)        // default 50
+  const [duration, setDuration] = useState(60)       // default 60
   const [useProxy, setUseProxy] = useState(false)
   const [proxies, setProxies] = useState('')
   const [loading, setLoading] = useState(false)
@@ -41,8 +41,7 @@ export default function Home() {
     setResult(null)
     setLiveStats(null)
 
-    // Parse proxies
-    const proxyList = useProxy ? proxies.split('\n').map(p=>p.trim()).filter(Boolean) : []
+    const proxyList = useProxy ? proxies.split('\n').map(p => p.trim()).filter(Boolean) : []
 
     const body = {
       target,
@@ -60,38 +59,34 @@ export default function Home() {
         body: JSON.stringify(body)
       })
 
-      // Read stream for live stats
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-        
-        // Process SSE-like lines
+
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
           if (line.trim().startsWith('data:')) {
             try {
               const data = JSON.parse(line.trim().slice(5))
-              setLiveStats(data)
+              if (data.final) {
+                setResult(data)
+                setLiveStats(null)
+              } else {
+                setLiveStats(data)
+              }
             } catch {}
           }
         }
       }
-      // Final data
-      if (buffer.trim().startsWith('data:')) {
-        try {
-          const finalData = JSON.parse(buffer.trim().slice(5))
-          setResult(finalData)
-        } catch {}
-      }
-      setLoading(false)
     } catch (err) {
       setError(err.message)
+    } finally {
       setLoading(false)
     }
   }
@@ -130,12 +125,12 @@ export default function Home() {
 
           <div className={styles.row}>
             <div className={styles.inputGroup}>
-              <label>Concurrency (threads)</label>
-              <input type="number" min="1" max="100000" value={threads} onChange={(e) => setThreads(Number(e.target.value))} required />
+              <label>Concurrency (threads) – Maks 500</label>
+              <input type="number" min="1" max="500" value={threads} onChange={(e) => setThreads(Number(e.target.value))} required />
             </div>
             <div className={styles.inputGroup}>
-              <label>Duration (detik)</label>
-              <input type="number" min="5" max="1200000" value={duration} onChange={(e) => setDuration(Number(e.target.value))} required />
+              <label>Duration (detik) – Maks 3600</label>
+              <input type="number" min="5" max="3600" value={duration} onChange={(e) => setDuration(Number(e.target.value))} required />
             </div>
           </div>
 
@@ -149,7 +144,7 @@ export default function Home() {
           {useProxy && (
             <div className={styles.inputGroup}>
               <label>Daftar Proxy (satu per baris, format http://user:pass@host:port)</label>
-              <textarea value={proxies} onChange={(e) => setProxies(e.target.value)} rows={4} 
+              <textarea value={proxies} onChange={(e) => setProxies(e.target.value)} rows={4}
                 placeholder="http://proxy1.com:8080&#10;http://proxy2.net:3128" />
             </div>
           )}
@@ -180,6 +175,10 @@ export default function Home() {
               <div className={styles.statCard}>
                 <span>RPS</span>
                 <strong>{liveStats.rps}</strong>
+              </div>
+              <div className={styles.statCard}>
+                <span>Elapsed</span>
+                <strong>{liveStats.elapsed}s</strong>
               </div>
             </div>
           </div>
